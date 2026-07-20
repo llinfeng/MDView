@@ -5,7 +5,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// Simple debug logging to file (only in debug builds or when MDVIEW_DEBUG env is set)
 #[allow(dead_code)]
@@ -39,6 +39,13 @@ use windows::core::PCWSTR;
 
 const WINDOW_CLASS_PREFIX: &str = "MDViewWebView2Host";
 
+/// Timer id used to poll the current file for changes (auto-refresh).
+const REFRESH_TIMER_ID: usize = 0xD00D;
+/// How often (ms) to poll the current file's modified time.
+const REFRESH_POLL_MS: u32 = 700;
+/// Default editor launched by the `e` shortcut; overridable via `MDVIEW_EDITOR`.
+const DEFAULT_EDITOR: &str = "C:\\Vim\\vim90\\gvim.exe";
+
 fn window_class_name() -> U16CString {
     let unique = format!("{}_{}", WINDOW_CLASS_PREFIX, window_proc as *const () as usize);
     U16CString::from_str(&unique).unwrap()
@@ -49,6 +56,11 @@ thread_local! {
     static CONTROLLERS: RefCell<HashMap<isize, Rc<ICoreWebView2Controller>>> = RefCell::new(HashMap::new());
     static CURRENT_FILES: RefCell<HashMap<isize, String>> = RefCell::new(HashMap::new());
     static DARK_MODES: RefCell<HashMap<isize, bool>> = RefCell::new(HashMap::new());
+    static FILE_MTIMES: RefCell<HashMap<isize, SystemTime>> = RefCell::new(HashMap::new());
+}
+
+fn file_mtime(path: &str) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 pub fn create_viewer(
@@ -91,6 +103,11 @@ pub fn create_viewer(
                 f.borrow_mut()
                     .insert(hwnd.0 as isize, file_path.to_string());
             });
+            if let Some(mtime) = file_mtime(file_path) {
+                FILE_MTIMES.with(|m| {
+                    m.borrow_mut().insert(hwnd.0 as isize, mtime);
+                });
+            }
         }
         DARK_MODES.with(|m| {
             m.borrow_mut().insert(hwnd.0 as isize, dark_mode);
@@ -106,6 +123,12 @@ pub fn create_viewer(
             });
             let _ = DestroyWindow(hwnd);
             return Err(e);
+        }
+
+        // Poll the current file for changes so the view auto-refreshes on edit.
+        // Total Commander's message loop dispatches WM_TIMER for this child window.
+        if file_path.is_some() {
+            SetTimer(Some(hwnd), REFRESH_TIMER_ID, REFRESH_POLL_MS, None);
         }
 
         Ok(hwnd)
@@ -480,6 +503,16 @@ fn init_webview2_sync(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                                         );
                                                     }
                                                 }
+                                            } else if msg_str.contains("\"refresh\"") {
+                                                reload_viewer(viewer_hwnd);
+                                            } else if msg_str.contains("\"edit\"") {
+                                                if let Some(file) = CURRENT_FILES.with(|f| {
+                                                    f.borrow()
+                                                        .get(&(viewer_hwnd.0 as isize))
+                                                        .cloned()
+                                                }) {
+                                                    open_in_editor(&file);
+                                                }
                                             } else if let Some(start) = msg_str.find("\"url\":\"") {
                                                 let url_start = start + 7;
                                                 if let Some(end) = msg_str[url_start..].find('"') {
@@ -650,6 +683,9 @@ fn init_webview2_sync(hwnd: HWND, html: &str) -> windows::core::Result<()> {
 }
 
 fn cleanup_viewer_state(hwnd: HWND) {
+    unsafe {
+        let _ = KillTimer(Some(hwnd), REFRESH_TIMER_ID);
+    }
     CONTROLLERS.with(|c| {
         if let Some(controller) = c.borrow_mut().remove(&(hwnd.0 as isize)) {
             let _ = unsafe { controller.Close() };
@@ -661,14 +697,82 @@ fn cleanup_viewer_state(hwnd: HWND) {
     DARK_MODES.with(|m| {
         m.borrow_mut().remove(&(hwnd.0 as isize));
     });
+    FILE_MTIMES.with(|m| {
+        m.borrow_mut().remove(&(hwnd.0 as isize));
+    });
+}
+
+/// Poll callback: reload the view when the current file changed on disk.
+fn check_file_changed(hwnd: HWND) {
+    let file = match CURRENT_FILES.with(|f| f.borrow().get(&(hwnd.0 as isize)).cloned()) {
+        Some(f) => f,
+        None => return,
+    };
+    let current = match file_mtime(&file) {
+        Some(m) => m,
+        None => return,
+    };
+    let changed = FILE_MTIMES.with(|m| match m.borrow().get(&(hwnd.0 as isize)) {
+        Some(prev) => *prev != current,
+        None => true,
+    });
+    if changed {
+        reload_viewer(hwnd);
+    }
+}
+
+/// Re-navigate to the current file's virtual URL, which re-reads it from disk.
+fn reload_viewer(hwnd: HWND) {
+    let file = match CURRENT_FILES.with(|f| f.borrow().get(&(hwnd.0 as isize)).cloned()) {
+        Some(f) => f,
+        None => return,
+    };
+    if let Some(mtime) = file_mtime(&file) {
+        FILE_MTIMES.with(|m| {
+            m.borrow_mut().insert(hwnd.0 as isize, mtime);
+        });
+    }
+    CONTROLLERS.with(|c| {
+        if let Some(controller) = c.borrow().get(&(hwnd.0 as isize)) {
+            if let Ok(webview) = unsafe { controller.CoreWebView2() } {
+                if let Some(url) = virtual_url_for_file(Path::new(&file)) {
+                    let url_wide = pwstr_from_str(&url);
+                    let _ = unsafe { webview.Navigate(PCWSTR(url_wide.as_ptr())) };
+                }
+            }
+        }
+    });
+}
+
+/// Launch the external editor (MDVIEW_EDITOR, else gvim) on the given file.
+fn open_in_editor(file_path: &str) {
+    let editor = std::env::var("MDVIEW_EDITOR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_EDITOR.to_string());
+    let editor_wide = U16CString::from_str(&editor).unwrap_or_default();
+    let params = format!("\"{}\"", file_path);
+    let params_wide = U16CString::from_str(&params).unwrap_or_default();
+    let open_wide = U16CString::from_str("open").unwrap_or_default();
+    unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(open_wide.as_ptr()),
+            PCWSTR(editor_wide.as_ptr()),
+            PCWSTR(params_wide.as_ptr()),
+            None,
+            SW_SHOWNORMAL,
+        );
+    }
 }
 
 fn unregister_window_class_if_unused() {
     let no_controllers = CONTROLLERS.with(|c| c.borrow().is_empty());
     let no_current_files = CURRENT_FILES.with(|f| f.borrow().is_empty());
     let no_dark_modes = DARK_MODES.with(|m| m.borrow().is_empty());
+    let no_mtimes = FILE_MTIMES.with(|m| m.borrow().is_empty());
 
-    if no_controllers && no_current_files && no_dark_modes {
+    if no_controllers && no_current_files && no_dark_modes && no_mtimes {
         unsafe {
             if let Ok(hinstance) = GetModuleHandleW(None) {
                 let class_name = window_class_name();
@@ -722,6 +826,12 @@ unsafe extern "system" fn window_proc(
     match msg {
         WM_SIZE => {
             resize_webview(hwnd);
+            LRESULT(0)
+        }
+        WM_TIMER => {
+            if wparam.0 == REFRESH_TIMER_ID {
+                check_file_changed(hwnd);
+            }
             LRESULT(0)
         }
         WM_DESTROY => LRESULT(0),
@@ -870,6 +980,11 @@ fn load_file_into_viewer(hwnd: HWND, file_path: &str) {
         f.borrow_mut()
             .insert(hwnd.0 as isize, file_path.to_string());
     });
+    if let Some(mtime) = file_mtime(file_path) {
+        FILE_MTIMES.with(|m| {
+            m.borrow_mut().insert(hwnd.0 as isize, mtime);
+        });
+    }
 }
 
 fn handle_follow_link(hwnd: HWND, url: &str) {

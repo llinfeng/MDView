@@ -10,6 +10,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::rc::Rc;
+use std::time::SystemTime;
 
 fn print_usage_console() {
     let usage = format!(
@@ -448,6 +449,13 @@ const IDM_HELP_ABOUT: u32 = 2001;
 const IDM_FILE_REGISTER: u32 = 1010;
 const IDM_FILE_UNREGISTER: u32 = 1011;
 const IDM_FILE_RECENT_BASE: u32 = 1100; // 1100-1109 for recent files
+
+/// Timer id for polling the current file for changes (auto-refresh).
+const REFRESH_TIMER_ID: usize = 0xD00D;
+/// How often (ms) to poll the current file's modified time.
+const REFRESH_POLL_MS: u32 = 700;
+/// Default editor launched by the `e` shortcut; overridable via `MDVIEW_EDITOR`.
+const DEFAULT_EDITOR: &str = "C:\\Vim\\vim90\\gvim.exe";
 
 // Registry key for settings
 const REGISTRY_KEY: &str = "Software\\MDView";
@@ -991,6 +999,74 @@ fn open_url_in_browser(url: &str) {
     }
 }
 
+fn file_mtime(path: &str) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// Launch the external editor (MDVIEW_EDITOR, else gvim) on the given file.
+fn open_in_editor(file_path: &str) {
+    let editor = std::env::var("MDVIEW_EDITOR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_EDITOR.to_string());
+    unsafe {
+        let editor_wide = U16CString::from_str(&editor).unwrap_or_default();
+        let params = format!("\"{}\"", file_path);
+        let params_wide = U16CString::from_str(&params).unwrap_or_default();
+        let open_wide = U16CString::from_str("open").unwrap_or_default();
+        ShellExecuteW(
+            None,
+            PCWSTR(open_wide.as_ptr()),
+            PCWSTR(editor_wide.as_ptr()),
+            PCWSTR(params_wide.as_ptr()),
+            None,
+            SW_SHOWNORMAL,
+        );
+    }
+}
+
+/// Re-navigate to the current file's virtual URL, which re-reads it from disk.
+fn reload_current_file() {
+    let file = match CURRENT_FILE.with(|f| f.borrow().clone()) {
+        Some(f) => f,
+        None => return,
+    };
+    if let Some(mtime) = file_mtime(&file) {
+        FILE_MTIME.with(|m| *m.borrow_mut() = Some(mtime));
+    }
+    if let Some(url) = virtual_url_for_file(Path::new(&file)) {
+        CONTROLLER.with(|c| {
+            if let Some(controller) = c.borrow().as_ref() {
+                unsafe {
+                    if let Ok(webview) = controller.CoreWebView2() {
+                        let url_wide = pwstr_from_str(&url);
+                        let _ = webview.Navigate(PCWSTR(url_wide.as_ptr()));
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// Poll callback: reload the view when the current file changed on disk.
+fn check_file_changed() {
+    let file = match CURRENT_FILE.with(|f| f.borrow().clone()) {
+        Some(f) => f,
+        None => return,
+    };
+    let current = match file_mtime(&file) {
+        Some(m) => m,
+        None => return,
+    };
+    let changed = FILE_MTIME.with(|m| match *m.borrow() {
+        Some(prev) => prev != current,
+        None => true,
+    });
+    if changed {
+        reload_current_file();
+    }
+}
+
 fn absolute_path(path: &Path) -> Option<std::path::PathBuf> {
     if path.is_absolute() {
         Some(path.to_path_buf())
@@ -1359,6 +1435,9 @@ fn load_file_into_webview(hwnd: HWND, file_path: &str) {
     CURRENT_FILE.with(|f| {
         *f.borrow_mut() = Some(file_path.to_string());
     });
+    if let Some(mtime) = file_mtime(file_path) {
+        FILE_MTIME.with(|m| *m.borrow_mut() = Some(mtime));
+    }
     add_to_recent_files(file_path);
 }
 
@@ -1893,7 +1972,12 @@ fn run_gui_inner(title: &str, html: &str, file_path: Option<&str>) -> windows::c
             CURRENT_FILE.with(|f| {
                 *f.borrow_mut() = Some(path.to_string());
             });
+            if let Some(mtime) = file_mtime(path) {
+                FILE_MTIME.with(|m| *m.borrow_mut() = Some(mtime));
+            }
             add_to_recent_files(path);
+            // Auto-refresh: poll the file for changes on a timer.
+            SetTimer(Some(hwnd), REFRESH_TIMER_ID, REFRESH_POLL_MS, None);
         }
 
         // Update recent files menu
@@ -1999,6 +2083,7 @@ thread_local! {
     static MENU_HANDLE: RefCell<Option<HMENU>> = const { RefCell::new(None) };
     static ACCEL_HANDLE: RefCell<Option<HACCEL>> = const { RefCell::new(None) };
     static MAIN_HWND: RefCell<Option<HWND>> = const { RefCell::new(None) };
+    static FILE_MTIME: RefCell<Option<SystemTime>> = const { RefCell::new(None) };
 }
 
 fn init_webview2_gui(hwnd: HWND, html: &str) -> windows::core::Result<()> {
@@ -2161,6 +2246,20 @@ fn init_webview2_gui(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                                     WPARAM(0),
                                                     LPARAM(0),
                                                 );
+                                                return Ok(());
+                                            }
+
+                                            if msg_str.contains("\"refresh\"") {
+                                                reload_current_file();
+                                                return Ok(());
+                                            }
+
+                                            if msg_str.contains("\"edit\"") {
+                                                if let Some(file) =
+                                                    CURRENT_FILE.with(|f| f.borrow().clone())
+                                                {
+                                                    open_in_editor(&file);
+                                                }
                                                 return Ok(());
                                             }
 
@@ -2351,9 +2450,16 @@ unsafe extern "system" fn window_proc(
             handle_drop_files(hwnd, hdrop);
             LRESULT(0)
         }
+        WM_TIMER => {
+            if wparam.0 == REFRESH_TIMER_ID {
+                check_file_changed();
+            }
+            LRESULT(0)
+        }
         WM_DESTROY => {
             // Save window position before closing
             save_window_position(hwnd);
+            let _ = unsafe { KillTimer(Some(hwnd), REFRESH_TIMER_ID) };
 
             CONTROLLER.with(|c| {
                 if let Some(controller) = c.borrow_mut().take() {

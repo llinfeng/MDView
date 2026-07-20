@@ -11,6 +11,8 @@ A fast, lightweight Markdown viewer for Windows. Available as a Total Commander 
 ## Features
 
 - **WebView2 rendering** - Modern HTML rendering with full Markdown support (GUI mode)
+- **Floating table of contents** - Collapsible H1–H6 outline docked to the side, with active-heading highlighting as you scroll (GUI mode)
+- **Live reload** - The view refreshes automatically when the file changes on disk, and preserves your scroll position (GUI mode)
 - **Auto dark mode** - Follows Windows appearance settings (GUI mode)
 - **Rich terminal output** - ANSI colors, clickable hyperlinks, unicode tables (terminal mode)
 - **Clickable links** - Click `.md` links to navigate, external links open in browser
@@ -119,8 +121,32 @@ mdview --unregister
 |-----|--------|
 | ESC | Close viewer |
 | Ctrl+O | Open file |
+| `r` | Refresh (re-read the file from disk) |
+| `e` | Edit the current file in an external editor |
+| `t` | Toggle the table of contents panel |
 | Click link | Navigate .md files in viewer, open external URLs in browser |
 | Ctrl+Click | Always open link in browser |
+
+### Table of Contents
+
+The GUI viewer shows a collapsible outline of all headings (H1–H6) docked to the
+left. Click a heading to jump to it; click the triangles to expand/collapse
+sections. The current heading is highlighted as you scroll. Use `t` (or the ☰
+button) to show/hide the panel. Its open/collapsed state is remembered per file.
+
+### Live Reload and Editing
+
+The viewer polls the open file and re-renders automatically whenever it changes
+on disk, so you can keep it open beside your editor. Press `r` to force a
+refresh, or `e` to open the file in an external editor.
+
+By default `e` launches gvim at `C:\Vim\vim90\gvim.exe`. Set the `MDVIEW_EDITOR`
+environment variable to use a different editor (the file path is passed as the
+first argument):
+
+```bat
+set MDVIEW_EDITOR=C:\Program Files\Notepad++\notepad++.exe
+```
 
 ### Menu Options (GUI mode)
 
