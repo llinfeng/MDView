@@ -9,6 +9,9 @@ on:
       - 'Cargo.lock'
       - 'build.rs'
       - '.github/workflows/**'
+  # Allows running the build/release manually from the Actions tab
+  # (useful on forks, where Actions must be enabled before any push triggers).
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
