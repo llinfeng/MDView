@@ -179,9 +179,8 @@ a { cursor: pointer; }
 #mdview-toc-toggle:hover { background-color: %%TOC_HOVER%%; }
 body.mdview-toc-open #mdview-toc-toggle { left: 248px; }
 
-@media (min-width: 1200px) {
-    body.mdview-toc-open { padding-left: 300px; }
-}
+/* Reserve space for the panel when open so it never overlaps the content. */
+body.mdview-toc-open { padding-left: 300px; }
 "#;
 
 /// Client-side script: heading ids, hash navigation, the collapsible TOC,
@@ -329,7 +328,8 @@ const VIEWER_SCRIPT: &str = r#"
 
         listRoot.innerHTML = '';
         render(root, listRoot);
-        panel.style.display = '';
+        // Explicit value: '' would fall back to the stylesheet's `display: none`.
+        panel.style.display = 'block';
         if (toggle) toggle.style.display = 'flex';
         return linkMap;
     }
