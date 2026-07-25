@@ -456,6 +456,9 @@ const REFRESH_TIMER_ID: usize = 0xD00D;
 const REFRESH_POLL_MS: u32 = 700;
 /// Default editor launched by the `e` shortcut; overridable via `MDVIEW_EDITOR`.
 const DEFAULT_EDITOR: &str = "C:\\Vim\\vim90\\gvim.exe";
+/// Posted to the main window to reload outside the WebView2 message callback
+/// (navigating from inside the callback is re-entrant and gets dropped).
+const WM_MDVIEW_REFRESH: u32 = WM_APP + 1;
 
 // Registry key for settings
 const REGISTRY_KEY: &str = "Software\\MDView";
@@ -1163,7 +1166,7 @@ fn create_web_resource_response(
     let stream = unsafe { SHCreateMemStream(Some(bytes)) }?;
     let reason_wide = pwstr_from_str(reason);
     let headers = format!(
-        "Content-Type: {}\r\nAccess-Control-Allow-Origin: *",
+        "Content-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store",
         content_type
     );
     let headers_wide = pwstr_from_str(&headers);
@@ -2250,7 +2253,14 @@ fn init_webview2_gui(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                             }
 
                                             if msg_str.contains("\"refresh\"") {
-                                                reload_current_file();
+                                                // Defer: navigating from inside this callback is
+                                                // re-entrant and silently dropped.
+                                                let _ = PostMessageW(
+                                                    Some(main_hwnd),
+                                                    WM_MDVIEW_REFRESH,
+                                                    WPARAM(0),
+                                                    LPARAM(0),
+                                                );
                                                 return Ok(());
                                             }
 
@@ -2454,6 +2464,10 @@ unsafe extern "system" fn window_proc(
             if wparam.0 == REFRESH_TIMER_ID {
                 check_file_changed();
             }
+            LRESULT(0)
+        }
+        WM_MDVIEW_REFRESH => {
+            reload_current_file();
             LRESULT(0)
         }
         WM_DESTROY => {

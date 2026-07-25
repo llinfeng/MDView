@@ -381,7 +381,7 @@ const VIEWER_SCRIPT: &str = r#"
 
         var open;
         if (state && typeof state.open === 'boolean') open = state.open;
-        else open = (window.innerWidth || 1200) >= 1200;
+        else open = true; // default visible; narrow panes can toggle with `t` / the button
         applyTocOpen(open);
     }
 

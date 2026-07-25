@@ -45,6 +45,9 @@ const REFRESH_TIMER_ID: usize = 0xD00D;
 const REFRESH_POLL_MS: u32 = 700;
 /// Default editor launched by the `e` shortcut; overridable via `MDVIEW_EDITOR`.
 const DEFAULT_EDITOR: &str = "C:\\Vim\\vim90\\gvim.exe";
+/// Posted to the host window to reload outside the WebView2 message callback
+/// (navigating from inside the callback is re-entrant and gets dropped).
+const WM_MDVIEW_REFRESH: u32 = WM_APP + 1;
 
 fn window_class_name() -> U16CString {
     let unique = format!("{}_{}", WINDOW_CLASS_PREFIX, window_proc as *const () as usize);
@@ -253,7 +256,7 @@ fn create_web_resource_response(
     let stream = unsafe { SHCreateMemStream(Some(bytes)) }?;
     let reason_wide = pwstr_from_str(reason);
     let headers = format!(
-        "Content-Type: {}\r\nAccess-Control-Allow-Origin: *",
+        "Content-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store",
         content_type
     );
     let headers_wide = pwstr_from_str(&headers);
@@ -388,7 +391,9 @@ fn init_webview2_sync(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                 let _ = settings.SetIsScriptEnabled(true); // needed for Ctrl+click and ESC handling
                                 let _ = settings.SetIsWebMessageEnabled(true); // needed for link clicks and ESC handling
                                 let _ = settings.SetAreDefaultContextMenusEnabled(false); // disable right-click menu
-                                let _ = settings.SetAreDevToolsEnabled(false); // disable F12 dev tools
+                                // DevTools (F12) off by default; enable for diagnosis via MDVIEW_DEBUG=1
+                                let _ = settings
+                                    .SetAreDevToolsEnabled(env::var("MDVIEW_DEBUG").is_ok());
                                 let _ = settings.SetIsStatusBarEnabled(false); // disable status bar
                                 let _ = settings.SetIsBuiltInErrorPageEnabled(false); // disable error pages
                                 let _ = settings.SetAreDefaultScriptDialogsEnabled(false); // disable alert/confirm/prompt
@@ -504,7 +509,14 @@ fn init_webview2_sync(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                                     }
                                                 }
                                             } else if msg_str.contains("\"refresh\"") {
-                                                reload_viewer(viewer_hwnd);
+                                                // Defer: navigating from inside this callback is
+                                                // re-entrant and silently dropped.
+                                                let _ = PostMessageW(
+                                                    Some(viewer_hwnd),
+                                                    WM_MDVIEW_REFRESH,
+                                                    WPARAM(0),
+                                                    LPARAM(0),
+                                                );
                                             } else if msg_str.contains("\"edit\"") {
                                                 if let Some(file) = CURRENT_FILES.with(|f| {
                                                     f.borrow()
@@ -832,6 +844,10 @@ unsafe extern "system" fn window_proc(
             if wparam.0 == REFRESH_TIMER_ID {
                 check_file_changed(hwnd);
             }
+            LRESULT(0)
+        }
+        WM_MDVIEW_REFRESH => {
+            reload_viewer(hwnd);
             LRESULT(0)
         }
         WM_DESTROY => LRESULT(0),
