@@ -502,7 +502,7 @@ const VIEWER_SCRIPT: &str = r#"
                 saveScroll();
                 webview.postMessage({type: 'refresh'});
             }
-        } else if (e.key === 'e' || e.key === 'E') {
+        } else if (e.key === 'e' || e.key === 'E' || e.key === 'i' || e.key === 'I') {
             if (webview) {
                 e.preventDefault();
                 webview.postMessage({type: 'edit'});

@@ -122,7 +122,7 @@ mdview --unregister
 | ESC | Close viewer |
 | Ctrl+O | Open file |
 | `r` | Refresh (re-read the file from disk) |
-| `e` | Edit the current file in an external editor |
+| `e` or `i` | Edit the current file in an external editor |
 | `t` | Toggle the table of contents panel |
 | Click link | Navigate .md files in viewer, open external URLs in browser |
 | Ctrl+Click | Always open link in browser |
