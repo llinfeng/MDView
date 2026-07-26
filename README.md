@@ -126,6 +126,7 @@ mdview --unregister
 | `t` | Toggle the table of contents panel |
 | `j` / `k` | Scroll down / up (line); moves between TOC entries when the TOC is focused |
 | `Ctrl+d` / `Ctrl+u` | Scroll half a page down / up |
+| `Ctrl+f` / `Ctrl+b` | Scroll a full page down / up |
 | `gg` / `G` | Jump to the top / bottom |
 | `[` / `]` | Jump to the previous / next heading |
 | `/` | Find text (Enter = next, Shift+Enter = previous, Esc = close) |

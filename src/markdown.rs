@@ -646,6 +646,15 @@ const VIEWER_SCRIPT: &str = r#"
             return;
         }
 
+        // Ctrl+f / Ctrl+b: full-page down / up (vim). preventDefault also
+        // suppresses the browser's built-in find on Ctrl+f.
+        if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'f' || e.key === 'b')) {
+            e.preventDefault();
+            var page = (window.innerHeight || 600) * 0.9;
+            window.scrollBy(0, e.key === 'f' ? page : -page);
+            return;
+        }
+
         // Everything below is a plain key (Shift is allowed, for `G`).
         if (e.ctrlKey || e.metaKey || e.altKey) return;
 
