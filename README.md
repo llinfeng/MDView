@@ -125,9 +125,9 @@ mdview --unregister
 | `e` or `i` | Edit the current file in an external editor |
 | `t` | Toggle the table of contents panel |
 | `j` / `k` | Scroll down / up (line) |
-| `h` / `l` | Scroll left / right |
 | `Ctrl+d` / `Ctrl+u` | Scroll half a page down / up |
 | `gg` / `G` | Jump to the top / bottom |
+| `Tab` | Switch to the other Total Commander pane |
 | ↑ ↓ PgUp PgDn Home End Space | Standard scrolling (browser defaults) |
 | Click link | Navigate .md files in viewer, open external URLs in browser |
 | Ctrl+Click | Always open link in browser |

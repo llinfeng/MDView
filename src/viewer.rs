@@ -569,10 +569,12 @@ fn init_webview2_sync(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                             || key_event_kind
                                                 == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
                                         {
-                                            // Pass F3, F5, F7, N keys to parent (Total Commander)
+                                            // Pass F3, F5, F7, N, and Tab keys to parent (Total
+                                            // Commander). Forwarding Tab lets TC move focus to the
+                                            // other pane instead of the WebView2 cycling HTML focus.
                                             let pass_to_parent = matches!(
                                                 VIRTUAL_KEY(key as u16),
-                                                VK_F3 | VK_F5 | VK_F7 | VK_N
+                                                VK_F3 | VK_F5 | VK_F7 | VK_N | VK_TAB
                                             );
 
                                             if pass_to_parent {

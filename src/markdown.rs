@@ -533,8 +533,6 @@ const VIEWER_SCRIPT: &str = r#"
         switch (e.key) {
             case 'j': e.preventDefault(); window.scrollBy(0, LINE_STEP); return;
             case 'k': e.preventDefault(); window.scrollBy(0, -LINE_STEP); return;
-            case 'h': e.preventDefault(); window.scrollBy(-LINE_STEP, 0); return;
-            case 'l': e.preventDefault(); window.scrollBy(LINE_STEP, 0); return;
             case 'G': e.preventDefault(); window.scrollTo(0, docBottom()); return; // Shift+G -> bottom
             case 'g': handleG(e); return;                                          // gg -> top
             case 't': case 'T': e.preventDefault(); toggleToc(); return;
