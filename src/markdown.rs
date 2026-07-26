@@ -482,6 +482,29 @@ const VIEWER_SCRIPT: &str = r#"
         }
     });
 
+    // ---- Vim-style navigation ----
+    var LINE_STEP = 64;
+    var pendingG = false, gTimer = null;
+
+    function docBottom() {
+        return Math.max(
+            document.body.scrollHeight,
+            document.documentElement.scrollHeight
+        );
+    }
+
+    function handleG(e) {
+        e.preventDefault();
+        if (pendingG) {
+            pendingG = false;
+            if (gTimer) { clearTimeout(gTimer); gTimer = null; }
+            window.scrollTo(0, 0); // gg -> top
+        } else {
+            pendingG = true;
+            gTimer = setTimeout(function() { pendingG = false; gTimer = null; }, 600);
+        }
+    }
+
     document.addEventListener('keydown', function(e) {
         var webview = window.chrome && window.chrome.webview;
 
@@ -490,26 +513,44 @@ const VIEWER_SCRIPT: &str = r#"
             return;
         }
 
-        // Ignore shortcuts while typing or when a modifier is held.
+        // Never hijack keys while typing in a field.
         var t = e.target;
         var editable = t && (t.isContentEditable
             || /^(input|textarea|select)$/i.test(t.tagName || ''));
-        if (editable || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (editable) return;
 
-        if (e.key === 'r' || e.key === 'R') {
-            if (webview) {
-                e.preventDefault();
-                saveScroll();
-                webview.postMessage({type: 'refresh'});
-            }
-        } else if (e.key === 'e' || e.key === 'E' || e.key === 'i' || e.key === 'I') {
-            if (webview) {
-                e.preventDefault();
-                webview.postMessage({type: 'edit'});
-            }
-        } else if (e.key === 't' || e.key === 'T') {
+        // Ctrl+d / Ctrl+u: half-page down / up (vim / Sumatra).
+        if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'd' || e.key === 'u')) {
             e.preventDefault();
-            toggleToc();
+            var half = (window.innerHeight || 600) * 0.5;
+            window.scrollBy(0, e.key === 'd' ? half : -half);
+            return;
+        }
+
+        // Everything below is a plain key (Shift is allowed, for `G`).
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+        switch (e.key) {
+            case 'j': e.preventDefault(); window.scrollBy(0, LINE_STEP); return;
+            case 'k': e.preventDefault(); window.scrollBy(0, -LINE_STEP); return;
+            case 'h': e.preventDefault(); window.scrollBy(-LINE_STEP, 0); return;
+            case 'l': e.preventDefault(); window.scrollBy(LINE_STEP, 0); return;
+            case 'G': e.preventDefault(); window.scrollTo(0, docBottom()); return; // Shift+G -> bottom
+            case 'g': handleG(e); return;                                          // gg -> top
+            case 't': case 'T': e.preventDefault(); toggleToc(); return;
+            case 'r': case 'R':
+                if (webview) {
+                    e.preventDefault();
+                    saveScroll();
+                    webview.postMessage({type: 'refresh'});
+                }
+                return;
+            case 'e': case 'E': case 'i': case 'I':
+                if (webview) {
+                    e.preventDefault();
+                    webview.postMessage({type: 'edit'});
+                }
+                return;
         }
     });
 })();

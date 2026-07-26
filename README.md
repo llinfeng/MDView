@@ -124,6 +124,11 @@ mdview --unregister
 | `r` | Refresh (re-read the file from disk) |
 | `e` or `i` | Edit the current file in an external editor |
 | `t` | Toggle the table of contents panel |
+| `j` / `k` | Scroll down / up (line) |
+| `h` / `l` | Scroll left / right |
+| `Ctrl+d` / `Ctrl+u` | Scroll half a page down / up |
+| `gg` / `G` | Jump to the top / bottom |
+| ↑ ↓ PgUp PgDn Home End Space | Standard scrolling (browser defaults) |
 | Click link | Navigate .md files in viewer, open external URLs in browser |
 | Ctrl+Click | Always open link in browser |
 
