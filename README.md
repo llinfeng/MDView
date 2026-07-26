@@ -13,6 +13,8 @@ A fast, lightweight Markdown viewer for Windows. Available as a Total Commander 
 - **WebView2 rendering** - Modern HTML rendering with full Markdown support (GUI mode)
 - **Floating table of contents** - Collapsible H1–H6 outline docked to the side, with active-heading highlighting as you scroll (GUI mode)
 - **Live reload** - The view refreshes automatically when the file changes on disk, and preserves your scroll position (GUI mode)
+- **Keyboard navigation** - Vim-style keys (`j`/`k`, `gg`/`G`, `Ctrl+d`/`Ctrl+u`, `Ctrl+f`/`Ctrl+b`) plus `[`/`]` to jump between headings (GUI mode)
+- **In-page find** - Press `/` to search the document (GUI mode)
 - **Auto dark mode** - Follows Windows appearance settings (GUI mode)
 - **Rich terminal output** - ANSI colors, clickable hyperlinks, unicode tables (terminal mode)
 - **Clickable links** - Click `.md` links to navigate, external links open in browser
@@ -29,6 +31,12 @@ A fast, lightweight Markdown viewer for Windows. Available as a Total Commander 
 3. Total Commander will automatically detect `pluginst.inf` and offer to install
 4. Select your preferred installation directory
 5. Configure file associations (`.md`, `.markdown`) in TC settings
+
+> **Updating an existing install:** close all Lister / Quick View windows (or
+> fully exit Total Commander) *before* installing a newer ZIP. A plugin DLL that
+> is still loaded cannot be overwritten in place, and Total Commander may crash
+> with an access violation if you overwrite it while it is loaded. After
+> installing, start Total Commander and reopen the file.
 
 ### Standalone Executable
 
@@ -142,11 +150,14 @@ left. Click a heading to jump to it; click the triangles to expand/collapse
 sections. The current heading is highlighted as you scroll. Use `t` (or the ☰
 button) to show/hide the panel. Its open/collapsed state is remembered per file.
 
+When the panel has focus (click an entry), `j` / `k` move between entries. From
+anywhere in the document, `[` and `]` jump to the previous / next heading.
+
 ### Live Reload and Editing
 
 The viewer polls the open file and re-renders automatically whenever it changes
 on disk, so you can keep it open beside your editor. Press `r` to force a
-refresh, or `e` to open the file in an external editor.
+refresh, or `e` (or `i`) to open the file in an external editor.
 
 By default `e` launches gvim at `C:\Vim\vim90\gvim.exe`. Set the `MDVIEW_EDITOR`
 environment variable to use a different editor (the file path is passed as the
@@ -155,6 +166,12 @@ first argument):
 ```bat
 set MDVIEW_EDITOR=C:\Program Files\Notepad++\notepad++.exe
 ```
+
+### Finding Text
+
+Press `/` to open the find bar in the top-right corner. Type your text, then
+press `Enter` to jump to the next match, `Shift+Enter` for the previous match,
+and `Esc` to close the bar. Search uses the browser's built-in text search.
 
 ### Menu Options (GUI mode)
 
@@ -185,6 +202,20 @@ cargo build --release --target i686-pc-windows-msvc
 cargo test
 ```
 
+#### Cross-compiling from Linux / WSL
+
+The Windows binaries can be built from Linux/WSL with
+[cargo-xwin](https://github.com/rust-cross/cargo-xwin):
+
+```bash
+cargo install cargo-xwin
+XWIN_ARCH=x86,x86_64 cargo xwin build --release --target x86_64-pc-windows-msvc
+XWIN_ARCH=x86,x86_64 cargo xwin build --release --target i686-pc-windows-msvc
+```
+
+`XWIN_ARCH=x86,x86_64` is required so the 32-bit import libraries are downloaded
+for the `i686` (32-bit Total Commander) target.
+
 ### Output Files
 
 After building, copy the following files for distribution:
@@ -207,6 +238,8 @@ If the plugin hangs or doesn't work correctly, enable debug logging:
 4. Check log file: `%TEMP%\mdview_debug.log`
 
 The log shows WebView2 initialization steps and helps identify where issues occur.
+With `MDVIEW_DEBUG=1` set, the plugin also enables the WebView2 developer tools
+(press `F12`) so you can inspect the rendered page.
 
 ### Common Issues
 
@@ -215,6 +248,8 @@ The log shows WebView2 initialization steps and helps identify where issues occu
 | Plugin hangs | WebView2 has a 30-second timeout; check debug log |
 | Blank display | Ensure WebView2 Runtime is installed |
 | F3 opens WebView search | Update to latest version (F3 now passed to TC) |
+| Total Commander crashes when updating the plugin | Close all Lister / Quick View windows (or exit TC) before installing the new ZIP; a loaded plugin DLL cannot be overwritten in place |
+| Table of contents is empty | The document has no headings, or you are on an old build — update to the latest version |
 
 ## Requirements
 
