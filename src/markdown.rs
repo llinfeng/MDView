@@ -505,6 +505,64 @@ const VIEWER_SCRIPT: &str = r#"
         }
     }
 
+    function tocVisible() {
+        var el = document.getElementById('mdview-toc');
+        return !!el && el.style.display !== 'none'
+            && !el.classList.contains('mdview-toc-hidden');
+    }
+
+    // True when the TOC is showing AND keyboard focus is inside it.
+    function tocFocused() {
+        var el = document.getElementById('mdview-toc');
+        return tocVisible() && el.contains(document.activeElement);
+    }
+
+    function visibleTocLinks() {
+        return Array.prototype.slice.call(
+            document.querySelectorAll('#mdview-toc a')
+        ).filter(function(a) { return a.offsetParent !== null; });
+    }
+
+    // Move the TOC selection to the next/prev visible entry and jump the
+    // document to it. Used by j/k while the TOC has focus.
+    function moveTocSelection(dir) {
+        var links = visibleTocLinks();
+        if (!links.length) return;
+        var cur = links.indexOf(document.activeElement);
+        if (cur === -1) {
+            var active = document.querySelector('#mdview-toc a.mdview-toc-active');
+            cur = active ? links.indexOf(active) : (dir > 0 ? -1 : 0);
+        }
+        var next = cur + dir;
+        if (next < 0) next = 0;
+        if (next > links.length - 1) next = links.length - 1;
+        var link = links[next];
+        link.focus({ preventScroll: true });
+        var href = link.getAttribute('href');
+        if (href && href.charAt(0) === '#') scrollToHash(href);
+    }
+
+    // Jump the document to the previous/next heading (bound to [ and ]).
+    function jumpHeading(dir) {
+        var hs = Array.prototype.slice.call(
+            document.querySelectorAll('h1,h2,h3,h4,h5,h6')
+        ).filter(function(h) { return h.id; });
+        if (!hs.length) return;
+        var target = null, i;
+        if (dir > 0) {
+            for (i = 0; i < hs.length; i++) {
+                if (hs[i].getBoundingClientRect().top > 2) { target = hs[i]; break; }
+            }
+            if (!target) target = hs[hs.length - 1];
+        } else {
+            for (i = hs.length - 1; i >= 0; i--) {
+                if (hs[i].getBoundingClientRect().top < -2) { target = hs[i]; break; }
+            }
+            if (!target) target = hs[0];
+        }
+        scrollToHash('#' + target.id);
+    }
+
     document.addEventListener('keydown', function(e) {
         var webview = window.chrome && window.chrome.webview;
 
@@ -531,8 +589,18 @@ const VIEWER_SCRIPT: &str = r#"
         if (e.ctrlKey || e.metaKey || e.altKey) return;
 
         switch (e.key) {
-            case 'j': e.preventDefault(); window.scrollBy(0, LINE_STEP); return;
-            case 'k': e.preventDefault(); window.scrollBy(0, -LINE_STEP); return;
+            case 'j':
+                e.preventDefault();
+                if (tocFocused()) moveTocSelection(1);   // navigate TOC entries
+                else window.scrollBy(0, LINE_STEP);       // otherwise scroll the doc
+                return;
+            case 'k':
+                e.preventDefault();
+                if (tocFocused()) moveTocSelection(-1);
+                else window.scrollBy(0, -LINE_STEP);
+                return;
+            case '[': e.preventDefault(); jumpHeading(-1); return; // previous heading
+            case ']': e.preventDefault(); jumpHeading(1); return;  // next heading
             case 'G': e.preventDefault(); window.scrollTo(0, docBottom()); return; // Shift+G -> bottom
             case 'g': handleG(e); return;                                          // gg -> top
             case 't': case 'T': e.preventDefault(); toggleToc(); return;
