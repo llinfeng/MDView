@@ -128,6 +128,7 @@ mdview --unregister
 | `Ctrl+d` / `Ctrl+u` | Scroll half a page down / up |
 | `gg` / `G` | Jump to the top / bottom |
 | `[` / `]` | Jump to the previous / next heading |
+| `/` | Find text (Enter = next, Shift+Enter = previous, Esc = close) |
 | `Tab` | Switch to the other Total Commander pane |
 | ↑ ↓ PgUp PgDn Home End Space | Standard scrolling (browser defaults) |
 | Click link | Navigate .md files in viewer, open external URLs in browser |

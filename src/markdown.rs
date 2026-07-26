@@ -181,6 +181,38 @@ body.mdview-toc-open #mdview-toc-toggle { left: 248px; }
 
 /* Reserve space for the panel when open so it never overlaps the content. */
 body.mdview-toc-open { padding-left: 300px; }
+
+/* ---- Find bar (/) ---- */
+#mdview-find {
+    position: fixed;
+    top: 10px;
+    right: 14px;
+    z-index: 1003;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background-color: %%TOC_BG%%;
+    border: 1px solid %%BORDER%%;
+    border-radius: 6px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+#mdview-find input {
+    border: 1px solid %%BORDER%%;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 13px;
+    background-color: %%BG%%;
+    color: %%TEXT%%;
+    outline: none;
+    min-width: 180px;
+}
+#mdview-find-status {
+    font-size: 12px;
+    opacity: 0.7;
+    min-width: 52px;
+    white-space: nowrap;
+}
 "#;
 
 /// Client-side script: heading ids, hash navigation, the collapsible TOC,
@@ -563,6 +595,35 @@ const VIEWER_SCRIPT: &str = r#"
         scrollToHash('#' + target.id);
     }
 
+    // ---- Find bar (triggered by `/`) ----
+    function openFind() {
+        var bar = document.getElementById('mdview-find');
+        if (!bar) return;
+        bar.style.display = 'flex';
+        var input = document.getElementById('mdview-find-input');
+        if (input) { input.focus(); input.select(); }
+    }
+
+    function closeFind() {
+        var bar = document.getElementById('mdview-find');
+        if (bar) bar.style.display = 'none';
+        var input = document.getElementById('mdview-find-input');
+        if (input) input.blur();
+        var status = document.getElementById('mdview-find-status');
+        if (status) status.textContent = '';
+    }
+
+    function runFind(query, backwards) {
+        var status = document.getElementById('mdview-find-status');
+        if (!query) { if (status) status.textContent = ''; return; }
+        var found = false;
+        try {
+            // window.find(text, caseSensitive, backwards, wrapAround, wholeWord, inFrames, showDialog)
+            found = window.find(query, false, !!backwards, true, false, false, false);
+        } catch (err) {}
+        if (status) status.textContent = found ? '' : 'No match';
+    }
+
     document.addEventListener('keydown', function(e) {
         var webview = window.chrome && window.chrome.webview;
 
@@ -601,6 +662,7 @@ const VIEWER_SCRIPT: &str = r#"
                 return;
             case '[': e.preventDefault(); jumpHeading(-1); return; // previous heading
             case ']': e.preventDefault(); jumpHeading(1); return;  // next heading
+            case '/': e.preventDefault(); openFind(); return;      // open find bar
             case 'G': e.preventDefault(); window.scrollTo(0, docBottom()); return; // Shift+G -> bottom
             case 'g': handleG(e); return;                                          // gg -> top
             case 't': case 'T': e.preventDefault(); toggleToc(); return;
@@ -619,6 +681,26 @@ const VIEWER_SCRIPT: &str = r#"
                 return;
         }
     });
+
+    // Find-bar input: Enter = next, Shift+Enter = previous, Esc = close.
+    // stopPropagation keeps these from reaching the document handler (whose
+    // Escape would otherwise close the Lister).
+    var findInput = document.getElementById('mdview-find-input');
+    if (findInput) {
+        findInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                runFind(findInput.value, e.shiftKey);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                closeFind();
+            } else {
+                e.stopPropagation();
+            }
+        });
+    }
 })();
 "#;
 
@@ -629,6 +711,13 @@ const TOC_MARKUP: &str = r#"<button id="mdview-toc-toggle" type="button" title="
 <div id="mdview-toc-header">Contents</div>
 <ul id="mdview-toc-list"></ul>
 </nav>
+"#;
+
+/// Markup for the find bar, revealed by pressing `/`.
+const FIND_MARKUP: &str = r#"<div id="mdview-find" role="search">
+<input id="mdview-find-input" type="text" placeholder="Find…" aria-label="Find in page" autocomplete="off" spellcheck="false">
+<span id="mdview-find-status" aria-live="polite"></span>
+</div>
 "#;
 
 pub fn wrap_html(content: &str, dark_mode: bool) -> String {
@@ -668,6 +757,7 @@ pub fn wrap_html(content: &str, dark_mode: bool) -> String {
     out.push_str(&styles);
     out.push_str("</style>\n</head>\n<body>\n");
     out.push_str(TOC_MARKUP);
+    out.push_str(FIND_MARKUP);
     out.push_str(&content);
     out.push_str("\n<script>");
     out.push_str(VIEWER_SCRIPT);
