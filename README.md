@@ -21,6 +21,7 @@ A fast, lightweight Markdown viewer for Windows. Available as a Total Commander 
 - **ESC to close** - Quick keyboard navigation
 - **Syntax highlighting** - Code blocks with proper formatting
 - **GitHub Flavored Markdown** - Tables, task lists, strikethrough, and more
+- **YAML front matter** - The leading `---` metadata block is shown as a dimmed comment instead of raw body text (GUI mode)
 
 ## Installation
 

@@ -1,15 +1,77 @@
 use pulldown_cmark::{Options, Parser, html};
 
+/// Split a leading YAML front-matter block from the document. The block must
+/// start with a `---` line at the very top and end at the next `---` or `...`
+/// line. Returns `(frontmatter, body)`; `None` when there is no such block (so
+/// a lone `---` stays a normal thematic break).
+fn split_frontmatter(markdown: &str) -> Option<(&str, &str)> {
+    let src = markdown.strip_prefix('\u{feff}').unwrap_or(markdown);
+
+    let first_nl = src.find('\n')?;
+    if src[..first_nl].trim_end_matches('\r') != "---" {
+        return None;
+    }
+    let content_start = first_nl + 1;
+
+    let mut cursor = content_start;
+    loop {
+        let (line, next, at_eof) = match src[cursor..].find('\n') {
+            Some(p) => (src[cursor..cursor + p].trim_end_matches('\r'), cursor + p + 1, false),
+            None => (src[cursor..].trim_end_matches('\r'), src.len(), true),
+        };
+        if line == "---" || line == "..." {
+            let body = if next <= src.len() { &src[next..] } else { "" };
+            return Some((&src[content_start..cursor], body));
+        }
+        if at_eof {
+            return None; // no closing delimiter -> not front matter
+        }
+        cursor = next;
+    }
+}
+
+fn escape_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Render captured front matter as a dimmed, comment-style block.
+fn render_frontmatter(frontmatter: &str) -> String {
+    let normalized = frontmatter.replace("\r\n", "\n");
+    let trimmed = normalized.trim_matches('\n');
+    if trimmed.trim().is_empty() {
+        return String::new();
+    }
+    format!(
+        "<pre class=\"mdview-frontmatter\">{}</pre>\n",
+        escape_html(trimmed)
+    )
+}
+
 pub fn markdown_to_html(markdown: &str) -> String {
+    let (frontmatter_html, body) = match split_frontmatter(markdown) {
+        Some((fm, rest)) => (render_frontmatter(fm), rest),
+        None => (String::new(), markdown),
+    };
+
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_FOOTNOTES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
 
-    let parser = Parser::new_ext(markdown, options);
+    let parser = Parser::new_ext(body, options);
 
     let mut html_output = String::new();
+    html_output.push_str(&frontmatter_html);
     html::push_html(&mut html_output, parser);
     html_output
 }
@@ -81,6 +143,21 @@ input[type="checkbox"] {
     margin-right: 0.5em;
 }
 a { cursor: pointer; }
+
+/* YAML front matter, shown dimmed like a comment. */
+.mdview-frontmatter {
+    background-color: transparent;
+    color: %%MUTED%%;
+    border-left: 3px solid %%BORDER%%;
+    border-radius: 0;
+    margin: 0 0 18px 0;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+}
 
 /* ---- Table of contents ---- */
 #mdview-toc {
@@ -731,17 +808,27 @@ const FIND_MARKUP: &str = r#"<div id="mdview-find" role="search">
 
 pub fn wrap_html(content: &str, dark_mode: bool) -> String {
     // (bg, text, code_bg, link, border, toc_bg, toc_hover, toc_active)
-    let (bg_color, text_color, code_bg, link_color, border_color, toc_bg, toc_hover, toc_active) =
-        if dark_mode {
-            (
-                "#1e1e1e", "#d4d4d4", "#2d2d2d", "#58a6ff", "#444", "#252526", "#2d2d30", "#37373d",
-            )
-        } else {
-            (
-                "#ffffff", "#24292e", "#f6f8fa", "#0366d6", "#e1e4e8", "#f6f8fa", "#eaeef2",
-                "#dbe9ff",
-            )
-        };
+    let (
+        bg_color,
+        text_color,
+        code_bg,
+        link_color,
+        border_color,
+        toc_bg,
+        toc_hover,
+        toc_active,
+        muted,
+    ) = if dark_mode {
+        (
+            "#1e1e1e", "#d4d4d4", "#2d2d2d", "#58a6ff", "#444", "#252526", "#2d2d30", "#37373d",
+            "#8b949e",
+        )
+    } else {
+        (
+            "#ffffff", "#24292e", "#f6f8fa", "#0366d6", "#e1e4e8", "#f6f8fa", "#eaeef2", "#dbe9ff",
+            "#6a737d",
+        )
+    };
 
     let content = content
         .replace("src=\"/", "src=\"")
@@ -757,7 +844,8 @@ pub fn wrap_html(content: &str, dark_mode: bool) -> String {
         .replace("%%BORDER%%", border_color)
         .replace("%%TOC_BG%%", toc_bg)
         .replace("%%TOC_HOVER%%", toc_hover)
-        .replace("%%TOC_ACTIVE%%", toc_active);
+        .replace("%%TOC_ACTIVE%%", toc_active)
+        .replace("%%MUTED%%", muted);
 
     let mut out = String::with_capacity(
         content.len() + styles.len() + VIEWER_SCRIPT.len() + TOC_MARKUP.len() + 256,
@@ -849,6 +937,44 @@ mod tests {
         assert!(html.contains("id=\"mdview-toc-toggle\""));
         // Color placeholders must all be substituted.
         assert!(!html.contains("%%"));
+    }
+
+    #[test]
+    fn test_frontmatter_rendered_as_comment_block() {
+        let md = "---\ntitle: Hello\ndate: 2026-07-29\n---\n\n# Body\n";
+        let html = markdown_to_html(md);
+        assert!(html.contains("class=\"mdview-frontmatter\""));
+        assert!(html.contains("title: Hello"));
+        assert!(html.contains("<h1>Body</h1>"));
+        let fm_pos = html.find("mdview-frontmatter").unwrap();
+        let h1_pos = html.find("<h1>").unwrap();
+        assert!(fm_pos < h1_pos, "front matter must precede the body");
+        assert!(!html.contains("<hr"), "delimiters must not become <hr>");
+    }
+
+    #[test]
+    fn test_frontmatter_closing_dots() {
+        let md = "---\ntitle: X\n...\n\nbody\n";
+        let html = markdown_to_html(md);
+        assert!(html.contains("class=\"mdview-frontmatter\""));
+        assert!(html.contains("title: X"));
+    }
+
+    #[test]
+    fn test_frontmatter_html_escaped() {
+        let md = "---\ntitle: <b>& stuff</b>\n---\n\nbody\n";
+        let html = markdown_to_html(md);
+        assert!(html.contains("&lt;b&gt;&amp; stuff"));
+        assert!(!html.contains("<b>& stuff"));
+    }
+
+    #[test]
+    fn test_lone_thematic_break_is_not_frontmatter() {
+        // A `---` that is not a closed leading block stays a thematic break.
+        let md = "intro\n\n---\n\nmore\n";
+        let html = markdown_to_html(md);
+        assert!(!html.contains("mdview-frontmatter"));
+        assert!(html.contains("<hr"));
     }
 
     #[test]
