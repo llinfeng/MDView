@@ -133,11 +133,13 @@ mdview --unregister
 | `r` | Refresh (re-read the file from disk) |
 | `e` or `i` | Edit the current file in an external editor |
 | `t` | Toggle the table of contents panel |
-| `j` / `k` | Scroll down / up (line); moves between TOC entries when the TOC is focused |
+| `j` / `k` | Scroll the body down / up — or move between TOC entries when the TOC is the active pane |
 | `Ctrl+d` / `Ctrl+u` | Scroll half a page down / up |
 | `Ctrl+f` / `Ctrl+b` | Scroll a full page down / up |
 | `gg` / `G` | Jump to the top / bottom |
 | `[` / `]` | Jump to the previous / next heading |
+| `+` / `-` | Zoom in / out (10% steps) |
+| `z` | Zoom to 120% |
 | `/` | Find text (Enter = next, Shift+Enter = previous, Esc = close) |
 | `Tab` | Switch to the other Total Commander pane |
 | ↑ ↓ PgUp PgDn Home End Space | Standard scrolling (browser defaults) |
@@ -151,8 +153,14 @@ left. Click a heading to jump to it; click the triangles to expand/collapse
 sections. The current heading is highlighted as you scroll. Use `t` (or the ☰
 button) to show/hide the panel. Its open/collapsed state is remembered per file.
 
-When the panel has focus (click an entry), `j` / `k` move between entries. From
-anywhere in the document, `[` and `]` jump to the previous / next heading.
+`j` / `k` step between TOC entries (and jump the document to each) while the TOC
+is the *active pane*. The TOC is active on entry whenever it is open; click the
+body text to scroll it with `j` / `k` instead, or click the TOC to drive it
+again. From anywhere, `[` and `]` jump to the previous / next heading.
+
+The panel's open/closed state is a global preference, so a `t`-minimize sticks
+across files and survives Total Commander reloading the Lister when focus
+changes.
 
 ### Live Reload and Editing
 
@@ -173,6 +181,11 @@ set MDVIEW_EDITOR=C:\Program Files\Notepad++\notepad++.exe
 Press `/` to open the find bar in the top-right corner. Type your text, then
 press `Enter` to jump to the next match, `Shift+Enter` for the previous match,
 and `Esc` to close the bar. Search uses the browser's built-in text search.
+
+### Zoom
+
+Press `+` / `-` to zoom in / out in 10% steps, and `z` to snap to 120%. The zoom
+level is remembered across files and reloads.
 
 ### Menu Options (GUI mode)
 

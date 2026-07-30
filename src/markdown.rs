@@ -343,21 +343,43 @@ const VIEWER_SCRIPT: &str = r#"
         return true;
     }
 
-    // ---- Scroll position preservation (survives auto-refresh reloads) ----
+    // ---- Persisted state ----
+    // localStorage (not sessionStorage): Total Commander recreates the Lister
+    // window on focus/selection change (ListCloseWindow + ListLoad), which
+    // starts a fresh WebView2 session. localStorage lives in the shared user-
+    // data profile, so scroll / TOC / zoom state survives that recreation.
     function scrollKey() { return 'mdview:scroll:' + (location.pathname || ''); }
     function tocStateKey() { return 'mdview:toc:' + (location.pathname || ''); }
+    var TOC_OPEN_KEY = 'mdview:tocOpen';
+    var ZOOM_KEY = 'mdview:zoom';
 
     function saveScroll() {
         try {
-            var y = window.scrollY || window.pageYOffset || 0;
-            sessionStorage.setItem(scrollKey(), String(y));
+            localStorage.setItem(scrollKey(), String(window.scrollY || window.pageYOffset || 0));
         } catch (e) {}
     }
 
     function restoreScroll() {
         try {
-            var v = sessionStorage.getItem(scrollKey());
+            var v = localStorage.getItem(scrollKey());
             if (v !== null) { window.scrollTo(0, parseInt(v, 10) || 0); }
+        } catch (e) {}
+    }
+
+    // ---- Zoom: `+`/`-` step by 10%, `z` resets to 120% ----
+    function getZoom() {
+        var z = parseFloat(document.documentElement.style.zoom);
+        return (isNaN(z) || z <= 0) ? 1 : z;
+    }
+    function applyZoom(z) {
+        z = Math.max(0.5, Math.min(3, Math.round(z * 100) / 100));
+        document.documentElement.style.zoom = String(z);
+        try { localStorage.setItem(ZOOM_KEY, String(z)); } catch (e) {}
+    }
+    function restoreZoom() {
+        try {
+            var v = localStorage.getItem(ZOOM_KEY);
+            if (v) document.documentElement.style.zoom = String(parseFloat(v) || 1);
         } catch (e) {}
     }
 
@@ -451,10 +473,11 @@ const VIEWER_SCRIPT: &str = r#"
                 var h = li.getAttribute('data-heading');
                 if (h) collapsed.push(h);
             });
+            localStorage.setItem(tocStateKey(), JSON.stringify({ collapsed: collapsed }));
             var open = !!panel
                 && !panel.classList.contains('mdview-toc-hidden')
                 && panel.style.display !== 'none';
-            sessionStorage.setItem(tocStateKey(), JSON.stringify({ open: open, collapsed: collapsed }));
+            localStorage.setItem(TOC_OPEN_KEY, open ? '1' : '0'); // global preference
         } catch (e) {}
     }
 
@@ -474,23 +497,28 @@ const VIEWER_SCRIPT: &str = r#"
     }
 
     function restoreTocState() {
-        var state = null;
-        try { state = JSON.parse(sessionStorage.getItem(tocStateKey()) || 'null'); } catch (e) {}
+        var collapsed = [];
+        try {
+            var s = JSON.parse(localStorage.getItem(tocStateKey()) || 'null');
+            if (s && s.collapsed) collapsed = s.collapsed;
+        } catch (e) {}
 
-        if (state && state.collapsed && state.collapsed.length) {
-            state.collapsed.forEach(function(hid) {
-                var li = document.querySelector('#mdview-toc li[data-heading="' + hid + '"]');
-                if (!li) return;
-                var caret = li.querySelector(':scope > .mdview-toc-row > .mdview-toc-caret');
-                if (!caret || caret.classList.contains('mdview-toc-empty')) return;
-                li.classList.add('mdview-toc-collapsed');
-                caret.textContent = '▸';
-            });
-        }
+        collapsed.forEach(function(hid) {
+            var li = document.querySelector('#mdview-toc li[data-heading="' + hid + '"]');
+            if (!li) return;
+            var caret = li.querySelector(':scope > .mdview-toc-row > .mdview-toc-caret');
+            if (!caret || caret.classList.contains('mdview-toc-empty')) return;
+            li.classList.add('mdview-toc-collapsed');
+            caret.textContent = '▸';
+        });
 
-        var open;
-        if (state && typeof state.open === 'boolean') open = state.open;
-        else open = true; // default visible; narrow panes can toggle with `t` / the button
+        // Open/closed is a global preference so a `t`-minimize sticks across
+        // files and across TC's focus-driven reloads. Default open.
+        var open = true;
+        try {
+            var o = localStorage.getItem(TOC_OPEN_KEY);
+            if (o !== null) open = (o === '1');
+        } catch (e) {}
         applyTocOpen(open);
     }
 
@@ -499,6 +527,7 @@ const VIEWER_SCRIPT: &str = r#"
         if (!panel || panel.style.display === 'none') return;
         var willOpen = panel.classList.contains('mdview-toc-hidden');
         applyTocOpen(willOpen);
+        tocActive = willOpen; // opening hands j/k to the TOC; closing hands it back to the body
         saveTocState();
     }
 
@@ -558,9 +587,17 @@ const VIEWER_SCRIPT: &str = r#"
                 toggleToc();
             });
         }
+        // Track which region j/k drive, based on where the user last clicked.
+        document.addEventListener('click', function(e) {
+            var toc = document.getElementById('mdview-toc');
+            var find = document.getElementById('mdview-find');
+            if (toc && toc.contains(e.target)) tocActive = true;
+            else if (!(find && find.contains(e.target))) tocActive = false;
+        }, true);
     }
 
     // ---- Boot ----
+    restoreZoom();
     assignHeadingIds();
     initToc();
 
@@ -620,11 +657,12 @@ const VIEWER_SCRIPT: &str = r#"
             && !el.classList.contains('mdview-toc-hidden');
     }
 
-    // True when the TOC is showing AND keyboard focus is inside it.
-    function tocFocused() {
-        var el = document.getElementById('mdview-toc');
-        return tocVisible() && el.contains(document.activeElement);
-    }
+    // Which region j/k drive: the TOC (true) or the document body (false).
+    // Defaults to the TOC when it is open on entry; clicking the body switches
+    // to the body, clicking the TOC switches back. This runs after the boot
+    // section above, so initToc() has already built and restored the TOC and
+    // tocVisible() is accurate here.
+    var tocActive = tocVisible();
 
     function visibleTocLinks() {
         return Array.prototype.slice.call(
@@ -632,22 +670,20 @@ const VIEWER_SCRIPT: &str = r#"
         ).filter(function(a) { return a.offsetParent !== null; });
     }
 
-    // Move the TOC selection to the next/prev visible entry and jump the
-    // document to it. Used by j/k while the TOC has focus.
+    function currentActiveIndex(links) {
+        var active = document.querySelector('#mdview-toc a.mdview-toc-active');
+        return active ? links.indexOf(active) : -1;
+    }
+
+    // Step the TOC selection to the next/prev visible entry and jump the
+    // document to it. Driven by j/k while the TOC is the active region.
     function moveTocSelection(dir) {
         var links = visibleTocLinks();
         if (!links.length) return;
-        var cur = links.indexOf(document.activeElement);
-        if (cur === -1) {
-            var active = document.querySelector('#mdview-toc a.mdview-toc-active');
-            cur = active ? links.indexOf(active) : (dir > 0 ? -1 : 0);
-        }
-        var next = cur + dir;
+        var next = currentActiveIndex(links) + dir;
         if (next < 0) next = 0;
         if (next > links.length - 1) next = links.length - 1;
-        var link = links[next];
-        link.focus({ preventScroll: true });
-        var href = link.getAttribute('href');
+        var href = links[next].getAttribute('href');
         if (href && href.charAt(0) === '#') scrollToHash(href);
     }
 
@@ -738,17 +774,20 @@ const VIEWER_SCRIPT: &str = r#"
         switch (e.key) {
             case 'j':
                 e.preventDefault();
-                if (tocFocused()) moveTocSelection(1);   // navigate TOC entries
-                else window.scrollBy(0, LINE_STEP);       // otherwise scroll the doc
+                if (tocActive && tocVisible()) moveTocSelection(1); // navigate TOC entries
+                else window.scrollBy(0, LINE_STEP);                 // otherwise scroll the doc
                 return;
             case 'k':
                 e.preventDefault();
-                if (tocFocused()) moveTocSelection(-1);
+                if (tocActive && tocVisible()) moveTocSelection(-1);
                 else window.scrollBy(0, -LINE_STEP);
                 return;
             case '[': e.preventDefault(); jumpHeading(-1); return; // previous heading
             case ']': e.preventDefault(); jumpHeading(1); return;  // next heading
             case '/': e.preventDefault(); openFind(); return;      // open find bar
+            case '+': case '=': e.preventDefault(); applyZoom(getZoom() + 0.1); return; // zoom in
+            case '-': case '_': e.preventDefault(); applyZoom(getZoom() - 0.1); return; // zoom out
+            case 'z': case 'Z': e.preventDefault(); applyZoom(1.2); return;             // zoom to 120%
             case 'G': e.preventDefault(); window.scrollTo(0, docBottom()); return; // Shift+G -> bottom
             case 'g': handleG(e); return;                                          // gg -> top
             case 't': case 'T': e.preventDefault(); toggleToc(); return;
