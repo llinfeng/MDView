@@ -353,16 +353,39 @@ const VIEWER_SCRIPT: &str = r#"
     var TOC_OPEN_KEY = 'mdview:tocOpen';
     var ZOOM_KEY = 'mdview:zoom';
 
+    // Save a pixel offset AND an anchor: the heading nearest the top of the
+    // viewport plus its offset. On refresh the file may have changed height
+    // above the fold, so re-pinning that heading resumes the reading position
+    // far more reliably than a raw pixel offset (which is the fallback).
     function saveScroll() {
         try {
-            localStorage.setItem(scrollKey(), String(window.scrollY || window.pageYOffset || 0));
+            var data = { y: window.scrollY || window.pageYOffset || 0 };
+            var hs = document.querySelectorAll('h1,h2,h3,h4,h5,h6');
+            for (var i = 0; i < hs.length; i++) {
+                var top = hs[i].getBoundingClientRect().top;
+                if (top <= 8) {
+                    if (hs[i].id) { data.id = hs[i].id; data.off = Math.round(top); }
+                } else break;
+            }
+            localStorage.setItem(scrollKey(), JSON.stringify(data));
         } catch (e) {}
     }
 
     function restoreScroll() {
         try {
-            var v = localStorage.getItem(scrollKey());
-            if (v !== null) { window.scrollTo(0, parseInt(v, 10) || 0); }
+            var raw = localStorage.getItem(scrollKey());
+            if (raw === null) return;
+            var data;
+            try { data = JSON.parse(raw); } catch (e) { data = { y: parseInt(raw, 10) || 0 }; }
+            if (data && data.id) {
+                var el = document.getElementById(data.id);
+                if (el) {
+                    var cur = el.getBoundingClientRect().top;
+                    window.scrollTo(0, (window.scrollY || window.pageYOffset || 0) + cur - (data.off || 0));
+                    return;
+                }
+            }
+            if (data && typeof data.y === 'number') window.scrollTo(0, data.y);
         } catch (e) {}
     }
 
@@ -597,14 +620,21 @@ const VIEWER_SCRIPT: &str = r#"
     }
 
     // ---- Boot ----
+    try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (e) {}
     restoreZoom();
     assignHeadingIds();
     initToc();
 
     if (!(location.hash && scrollToHash(location.hash))) {
         restoreScroll();
+        requestAnimationFrame(restoreScroll); // re-assert once layout settles
     }
 
+    var scrollSaveTimer = null;
+    window.addEventListener('scroll', function() {
+        if (scrollSaveTimer) return;
+        scrollSaveTimer = setTimeout(function() { scrollSaveTimer = null; saveScroll(); }, 250);
+    }, { passive: true });
     window.addEventListener('beforeunload', saveScroll);
     setInterval(saveScroll, 1000);
 

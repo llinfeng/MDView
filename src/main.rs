@@ -2470,6 +2470,18 @@ unsafe extern "system" fn window_proc(
             reload_current_file();
             LRESULT(0)
         }
+        WM_SETFOCUS => {
+            // Forward focus into the WebView2 so keyboard shortcuts work without
+            // clicking the page first.
+            CONTROLLER.with(|c| {
+                if let Some(controller) = c.borrow().as_ref() {
+                    let _ = unsafe {
+                        controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
+                    };
+                }
+            });
+            LRESULT(0)
+        }
         WM_DESTROY => {
             // Save window position before closing
             save_window_position(hwnd);

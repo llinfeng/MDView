@@ -134,8 +134,28 @@ pub fn create_viewer(
             SetTimer(Some(hwnd), REFRESH_TIMER_ID, REFRESH_POLL_MS, None);
         }
 
+        // If TC already gave this window focus, hand it to the WebView2 so the
+        // keyboard shortcuts work immediately without an initial click. (Done
+        // only when already focused, to avoid stealing focus in Quick View.)
+        if windows::Win32::UI::Input::KeyboardAndMouse::GetFocus() == hwnd {
+            move_focus_to_webview(hwnd);
+        }
+
         Ok(hwnd)
     }
+}
+
+/// Forward keyboard focus into the WebView2 that hosts the page. The WebView2
+/// lives in its own child HWND, so a focused host window does not by itself
+/// deliver key events to the document.
+fn move_focus_to_webview(hwnd: HWND) {
+    CONTROLLERS.with(|c| {
+        if let Some(controller) = c.borrow().get(&(hwnd.0 as isize)) {
+            let _ = unsafe {
+                controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
+            };
+        }
+    });
 }
 
 fn register_window_class() -> windows::core::Result<()> {
@@ -846,6 +866,12 @@ unsafe extern "system" fn window_proc(
             if wparam.0 == REFRESH_TIMER_ID {
                 check_file_changed(hwnd);
             }
+            LRESULT(0)
+        }
+        WM_SETFOCUS => {
+            // Host window got focus -> pass it into the WebView2 so keyboard
+            // shortcuts work without clicking the page first.
+            move_focus_to_webview(hwnd);
             LRESULT(0)
         }
         WM_MDVIEW_REFRESH => {

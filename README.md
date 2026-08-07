@@ -12,7 +12,7 @@ A fast, lightweight Markdown viewer for Windows. Available as a Total Commander 
 
 - **WebView2 rendering** - Modern HTML rendering with full Markdown support (GUI mode)
 - **Floating table of contents** - Collapsible H1–H6 outline docked to the side, with active-heading highlighting as you scroll (GUI mode)
-- **Live reload** - The view refreshes automatically when the file changes on disk, and preserves your scroll position (GUI mode)
+- **Live reload** - The view refreshes automatically when the file changes on disk, and resumes your reading position, anchored to the nearest heading (GUI mode)
 - **Keyboard navigation** - Vim-style keys (`j`/`k`, `gg`/`G`, `Ctrl+d`/`Ctrl+u`, `Ctrl+f`/`Ctrl+b`) plus `[`/`]` to jump between headings (GUI mode)
 - **In-page find** - Press `/` to search the document (GUI mode)
 - **Auto dark mode** - Follows Windows appearance settings (GUI mode)
@@ -125,6 +125,9 @@ mdview --unregister
 | True color (24-bit) | Yes | Limited |
 
 ### Keyboard Shortcuts (GUI mode)
+
+The viewer takes keyboard focus as soon as its pane is focused, so the shortcuts
+below work without clicking the page first.
 
 | Key | Action |
 |-----|--------|
