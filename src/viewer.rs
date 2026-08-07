@@ -60,6 +60,9 @@ thread_local! {
     static CURRENT_FILES: RefCell<HashMap<isize, String>> = RefCell::new(HashMap::new());
     static DARK_MODES: RefCell<HashMap<isize, bool>> = RefCell::new(HashMap::new());
     static FILE_MTIMES: RefCell<HashMap<isize, SystemTime>> = RefCell::new(HashMap::new());
+    // The window (TC file pane) that had focus before ours, so Tab can hand
+    // focus back to it instead of cycling inside the WebView2.
+    static PREV_FOCUS: RefCell<HashMap<isize, HWND>> = RefCell::new(HashMap::new());
 }
 
 fn file_mtime(path: &str) -> Option<SystemTime> {
@@ -589,18 +592,30 @@ fn init_webview2_sync(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                             || key_event_kind
                                                 == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
                                         {
-                                            // Pass F3, F5, F7, N, and Tab keys to parent (Total
-                                            // Commander). Forwarding Tab lets TC move focus to the
-                                            // other pane instead of the WebView2 cycling HTML focus.
-                                            let pass_to_parent = matches!(
-                                                VIRTUAL_KEY(key as u16),
-                                                VK_F3 | VK_F5 | VK_F7 | VK_N | VK_TAB
-                                            );
-
-                                            if pass_to_parent {
-                                                // Mark as handled so WebView2 doesn't process it
+                                            let vkey = VIRTUAL_KEY(key as u16);
+                                            if vkey == VK_TAB {
+                                                // Tab: leave the preview and return focus to the
+                                                // pane we came from, instead of the WebView2
+                                                // cycling through TOC / body links.
                                                 let _ = args.SetHandled(true);
-                                                // Forward to parent window
+                                                let prev = PREV_FOCUS.with(|p| {
+                                                    p.borrow().get(&(accel_parent.0 as isize)).copied()
+                                                });
+                                                if let Some(prev) = prev.filter(|w| !w.is_invalid()) {
+                                                    let _ = SetFocus(Some(prev));
+                                                } else if let Ok(parent) = GetParent(accel_parent) {
+                                                    if !parent.is_invalid() {
+                                                        let _ = PostMessageW(
+                                                            Some(parent),
+                                                            WM_KEYDOWN,
+                                                            WPARAM(key as usize),
+                                                            LPARAM(0),
+                                                        );
+                                                    }
+                                                }
+                                            } else if matches!(vkey, VK_F3 | VK_F5 | VK_F7 | VK_N) {
+                                                // Pass these keys to parent (Total Commander).
+                                                let _ = args.SetHandled(true);
                                                 if let Ok(parent) = GetParent(accel_parent) {
                                                     if !parent.is_invalid() {
                                                         let _ = PostMessageW(
@@ -733,6 +748,9 @@ fn cleanup_viewer_state(hwnd: HWND) {
     });
     FILE_MTIMES.with(|m| {
         m.borrow_mut().remove(&(hwnd.0 as isize));
+    });
+    PREV_FOCUS.with(|p| {
+        p.borrow_mut().remove(&(hwnd.0 as isize));
     });
 }
 
@@ -869,6 +887,16 @@ unsafe extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_SETFOCUS => {
+            // Remember the external window that had focus before us (the TC file
+            // pane) so Tab can return focus to it. wParam is the window losing
+            // focus; ignore our own child windows (e.g. the WebView2).
+            let prev = HWND(wparam.0 as *mut core::ffi::c_void);
+            let is_child = !prev.is_invalid() && unsafe { IsChild(hwnd, prev) }.as_bool();
+            if !prev.is_invalid() && !is_child && prev != hwnd {
+                PREV_FOCUS.with(|p| {
+                    p.borrow_mut().insert(hwnd.0 as isize, prev);
+                });
+            }
             // Host window got focus -> pass it into the WebView2 so keyboard
             // shortcuts work without clicking the page first.
             move_focus_to_webview(hwnd);
