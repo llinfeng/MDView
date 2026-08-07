@@ -780,6 +780,15 @@ const VIEWER_SCRIPT: &str = r#"
             return;
         }
 
+        if (e.key === 'Tab') {
+            // Leave the preview instead of letting the browser cycle focus
+            // through the page's links (including the off-screen TOC). Native
+            // hands focus back to the pane we came from.
+            e.preventDefault();
+            if (webview) webview.postMessage({type: 'tab'});
+            return;
+        }
+
         // Never hijack keys while typing in a field.
         var t = e.target;
         var editable = t && (t.isContentEditable

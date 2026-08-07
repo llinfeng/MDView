@@ -48,6 +48,8 @@ const DEFAULT_EDITOR: &str = "C:\\Vim\\vim90\\gvim.exe";
 /// Posted to the host window to reload outside the WebView2 message callback
 /// (navigating from inside the callback is re-entrant and gets dropped).
 const WM_MDVIEW_REFRESH: u32 = WM_APP + 1;
+/// Posted to the host window to return focus to the TC pane on Tab.
+const WM_MDVIEW_TABOUT: u32 = WM_APP + 2;
 
 fn window_class_name() -> U16CString {
     let unique = format!("{}_{}", WINDOW_CLASS_PREFIX, window_proc as *const () as usize);
@@ -145,6 +147,27 @@ pub fn create_viewer(
         }
 
         Ok(hwnd)
+    }
+}
+
+/// Return keyboard focus to the TC pane we came from (captured on WM_SETFOCUS)
+/// so Tab leaves the preview. Falls back to posting Tab to the parent window.
+fn return_focus_to_pane(hwnd: HWND) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{SetFocus, VK_TAB};
+    let prev = PREV_FOCUS.with(|p| p.borrow().get(&(hwnd.0 as isize)).copied());
+    unsafe {
+        if let Some(prev) = prev.filter(|w| !w.is_invalid()) {
+            let _ = SetFocus(Some(prev));
+        } else if let Ok(parent) = GetParent(hwnd) {
+            if !parent.is_invalid() {
+                let _ = PostMessageW(
+                    Some(parent),
+                    WM_KEYDOWN,
+                    WPARAM(VK_TAB.0 as usize),
+                    LPARAM(0),
+                );
+            }
+        }
     }
 }
 
@@ -548,6 +571,14 @@ fn init_webview2_sync(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                                 }) {
                                                     open_in_editor(&file);
                                                 }
+                                            } else if msg_str.contains("\"tab\"") {
+                                                // Defer focus change out of this callback.
+                                                let _ = PostMessageW(
+                                                    Some(viewer_hwnd),
+                                                    WM_MDVIEW_TABOUT,
+                                                    WPARAM(0),
+                                                    LPARAM(0),
+                                                );
                                             } else if let Some(start) = msg_str.find("\"url\":\"") {
                                                 let url_start = start + 7;
                                                 if let Some(end) = msg_str[url_start..].find('"') {
@@ -904,6 +935,10 @@ unsafe extern "system" fn window_proc(
         }
         WM_MDVIEW_REFRESH => {
             reload_viewer(hwnd);
+            LRESULT(0)
+        }
+        WM_MDVIEW_TABOUT => {
+            return_focus_to_pane(hwnd);
             LRESULT(0)
         }
         WM_DESTROY => LRESULT(0),
