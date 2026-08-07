@@ -176,6 +176,7 @@ a { cursor: pointer; }
     z-index: 1000;
     transition: transform 0.15s ease;
     display: none;
+    user-select: none; /* excluded from Ctrl+A / select-all */
 }
 #mdview-toc.mdview-toc-hidden {
     transform: translateX(-100%);
@@ -252,6 +253,7 @@ a { cursor: pointer; }
     align-items: center;
     justify-content: center;
     transition: left 0.15s ease;
+    user-select: none;
 }
 #mdview-toc-toggle:hover { background-color: %%TOC_HOVER%%; }
 body.mdview-toc-open #mdview-toc-toggle { left: 248px; }
@@ -290,6 +292,9 @@ body.mdview-toc-open { padding-left: 300px; }
     min-width: 52px;
     white-space: nowrap;
 }
+/* Keep the find bar chrome out of select-all, but let its input select text. */
+#mdview-find { user-select: none; }
+#mdview-find input { user-select: text; }
 "#;
 
 /// Client-side script: heading ids, hash navigation, the collapsible TOC,
