@@ -1038,16 +1038,17 @@ fn reload_current_file() {
         FILE_MTIME.with(|m| *m.borrow_mut() = Some(mtime));
     }
     if let Some(url) = virtual_url_for_file(Path::new(&file)) {
-        CONTROLLER.with(|c| {
-            if let Some(controller) = c.borrow().as_ref() {
-                unsafe {
-                    if let Ok(webview) = controller.CoreWebView2() {
-                        let url_wide = pwstr_from_str(&url);
-                        let _ = webview.Navigate(PCWSTR(url_wide.as_ptr()));
-                    }
+        // Clone the controller out of the RefCell before the COM call so a
+        // re-entrant borrow (e.g. teardown) can't panic under panic=abort.
+        let controller = CONTROLLER.with(|c| c.borrow().as_ref().cloned());
+        if let Some(controller) = controller {
+            unsafe {
+                if let Ok(webview) = controller.CoreWebView2() {
+                    let url_wide = pwstr_from_str(&url);
+                    let _ = webview.Navigate(PCWSTR(url_wide.as_ptr()));
                 }
             }
-        });
+        }
     }
 }
 
@@ -1412,16 +1413,15 @@ fn load_file_into_webview(hwnd: HWND, file_path: &str) {
     }
 
     if let Some(url) = virtual_url_for_file(Path::new(file_path)) {
-        CONTROLLER.with(|c| {
-            if let Some(controller) = c.borrow().as_ref() {
-                unsafe {
-                    if let Ok(webview) = controller.CoreWebView2() {
-                        let url_wide = pwstr_from_str(&url);
-                        let _ = webview.Navigate(PCWSTR(url_wide.as_ptr()));
-                    }
+        let controller = CONTROLLER.with(|c| c.borrow().as_ref().cloned());
+        if let Some(controller) = controller {
+            unsafe {
+                if let Ok(webview) = controller.CoreWebView2() {
+                    let url_wide = pwstr_from_str(&url);
+                    let _ = webview.Navigate(PCWSTR(url_wide.as_ptr()));
                 }
             }
-        });
+        }
     }
 
     // Update window title
@@ -2377,13 +2377,12 @@ unsafe extern "system" fn window_proc(
 
             // Also resize WebView on WM_SIZE
             if msg == WM_SIZE {
-                CONTROLLER.with(|c| {
-                    if let Some(controller) = c.borrow().as_ref() {
-                        let mut rect = RECT::default();
-                        let _ = unsafe { GetClientRect(hwnd, &mut rect) };
-                        let _ = unsafe { controller.SetBounds(rect) };
-                    }
-                });
+                let controller = CONTROLLER.with(|c| c.borrow().as_ref().cloned());
+                if let Some(controller) = controller {
+                    let mut rect = RECT::default();
+                    let _ = unsafe { GetClientRect(hwnd, &mut rect) };
+                    let _ = unsafe { controller.SetBounds(rect) };
+                }
             }
             return result;
         }
@@ -2473,13 +2472,12 @@ unsafe extern "system" fn window_proc(
         WM_SETFOCUS => {
             // Forward focus into the WebView2 so keyboard shortcuts work without
             // clicking the page first.
-            CONTROLLER.with(|c| {
-                if let Some(controller) = c.borrow().as_ref() {
-                    let _ = unsafe {
-                        controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
-                    };
-                }
-            });
+            let controller = CONTROLLER.with(|c| c.borrow().as_ref().cloned());
+            if let Some(controller) = controller {
+                let _ = unsafe {
+                    controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
+                };
+            }
             LRESULT(0)
         }
         WM_DESTROY => {
@@ -2487,11 +2485,10 @@ unsafe extern "system" fn window_proc(
             save_window_position(hwnd);
             let _ = unsafe { KillTimer(Some(hwnd), REFRESH_TIMER_ID) };
 
-            CONTROLLER.with(|c| {
-                if let Some(controller) = c.borrow_mut().take() {
-                    let _ = unsafe { controller.Close() };
-                }
-            });
+            let controller = CONTROLLER.with(|c| c.borrow_mut().take());
+            if let Some(controller) = controller {
+                let _ = unsafe { controller.Close() };
+            }
             unsafe { PostQuitMessage(0) };
             LRESULT(0)
         }

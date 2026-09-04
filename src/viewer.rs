@@ -175,13 +175,10 @@ fn return_focus_to_pane(hwnd: HWND) {
 /// lives in its own child HWND, so a focused host window does not by itself
 /// deliver key events to the document.
 fn move_focus_to_webview(hwnd: HWND) {
-    CONTROLLERS.with(|c| {
-        if let Some(controller) = c.borrow().get(&(hwnd.0 as isize)) {
-            let _ = unsafe {
-                controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
-            };
-        }
-    });
+    let controller = CONTROLLERS.with(|c| c.borrow().get(&(hwnd.0 as isize)).cloned());
+    if let Some(controller) = controller {
+        let _ = unsafe { controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) };
+    }
 }
 
 fn register_window_class() -> windows::core::Result<()> {
@@ -766,11 +763,14 @@ fn cleanup_viewer_state(hwnd: HWND) {
     unsafe {
         let _ = KillTimer(Some(hwnd), REFRESH_TIMER_ID);
     }
-    CONTROLLERS.with(|c| {
-        if let Some(controller) = c.borrow_mut().remove(&(hwnd.0 as isize)) {
-            let _ = unsafe { controller.Close() };
-        }
-    });
+    // Take the controller OUT of the RefCell first, then Close() with no borrow
+    // held. Close() re-enters our window proc (focus/size callbacks), which
+    // borrows CONTROLLERS; holding a borrow_mut across it panics ("already
+    // mutably borrowed") and, under panic=abort, kills the whole TC process.
+    let controller = CONTROLLERS.with(|c| c.borrow_mut().remove(&(hwnd.0 as isize)));
+    if let Some(controller) = controller {
+        let _ = unsafe { controller.Close() };
+    }
     CURRENT_FILES.with(|f| {
         f.borrow_mut().remove(&(hwnd.0 as isize));
     });
@@ -815,16 +815,15 @@ fn reload_viewer(hwnd: HWND) {
             m.borrow_mut().insert(hwnd.0 as isize, mtime);
         });
     }
-    CONTROLLERS.with(|c| {
-        if let Some(controller) = c.borrow().get(&(hwnd.0 as isize)) {
-            if let Ok(webview) = unsafe { controller.CoreWebView2() } {
-                if let Some(url) = virtual_url_for_file(Path::new(&file)) {
-                    let url_wide = pwstr_from_str(&url);
-                    let _ = unsafe { webview.Navigate(PCWSTR(url_wide.as_ptr())) };
-                }
+    let controller = CONTROLLERS.with(|c| c.borrow().get(&(hwnd.0 as isize)).cloned());
+    if let Some(controller) = controller {
+        if let Ok(webview) = unsafe { controller.CoreWebView2() } {
+            if let Some(url) = virtual_url_for_file(Path::new(&file)) {
+                let url_wide = pwstr_from_str(&url);
+                let _ = unsafe { webview.Navigate(PCWSTR(url_wide.as_ptr())) };
             }
         }
-    });
+    }
 }
 
 /// Launch the external editor (MDVIEW_EDITOR, else gvim) on the given file.
@@ -866,38 +865,36 @@ fn unregister_window_class_if_unused() {
 }
 
 pub fn close_window(hwnd: HWND) {
-    // Remove and close the controller
-    CONTROLLERS.with(|c| {
-        if let Some(controller) = c.borrow_mut().remove(&(hwnd.0 as isize)) {
-            let _ = unsafe { controller.Close() };
-        }
-    });
+    // Take the controller out before Close() (see cleanup_viewer_state): Close()
+    // re-enters and borrows CONTROLLERS, so a borrow_mut held across it panics.
+    let controller = CONTROLLERS.with(|c| c.borrow_mut().remove(&(hwnd.0 as isize)));
+    if let Some(controller) = controller {
+        let _ = unsafe { controller.Close() };
+    }
 
     // Destroy the window; final state cleanup happens in WM_NCDESTROY
     let _ = unsafe { DestroyWindow(hwnd) };
 }
 
 pub fn execute_script(hwnd: HWND, script: &str) {
-    CONTROLLERS.with(|c| {
-        if let Some(controller) = c.borrow().get(&(hwnd.0 as isize)) {
-            if let Ok(webview) = unsafe { controller.CoreWebView2() } {
-                let script_wide = pwstr_from_str(script);
-                let _ = unsafe { webview.ExecuteScript(PCWSTR(script_wide.as_ptr()), None) };
-            }
+    let controller = CONTROLLERS.with(|c| c.borrow().get(&(hwnd.0 as isize)).cloned());
+    if let Some(controller) = controller {
+        if let Ok(webview) = unsafe { controller.CoreWebView2() } {
+            let script_wide = pwstr_from_str(script);
+            let _ = unsafe { webview.ExecuteScript(PCWSTR(script_wide.as_ptr()), None) };
         }
-    });
+    }
 }
 
 fn resize_webview(hwnd: HWND) {
-    CONTROLLERS.with(|c| {
-        if let Some(controller) = c.borrow().get(&(hwnd.0 as isize)) {
-            unsafe {
-                let mut rect = RECT::default();
-                let _ = GetClientRect(hwnd, &mut rect);
-                let _ = controller.SetBounds(rect);
-            }
+    let controller = CONTROLLERS.with(|c| c.borrow().get(&(hwnd.0 as isize)).cloned());
+    if let Some(controller) = controller {
+        unsafe {
+            let mut rect = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rect);
+            let _ = controller.SetBounds(rect);
         }
-    });
+    }
 }
 
 unsafe extern "system" fn window_proc(
@@ -1072,16 +1069,15 @@ fn load_file_into_viewer(hwnd: HWND, file_path: &str) {
         return;
     }
 
-    CONTROLLERS.with(|c| {
-        if let Some(controller) = c.borrow().get(&(hwnd.0 as isize)) {
-            if let Ok(webview) = unsafe { controller.CoreWebView2() } {
-                if let Some(url) = virtual_url_for_file(Path::new(file_path)) {
-                    let url_wide = pwstr_from_str(&url);
-                    let _ = unsafe { webview.Navigate(PCWSTR(url_wide.as_ptr())) };
-                }
+    let controller = CONTROLLERS.with(|c| c.borrow().get(&(hwnd.0 as isize)).cloned());
+    if let Some(controller) = controller {
+        if let Ok(webview) = unsafe { controller.CoreWebView2() } {
+            if let Some(url) = virtual_url_for_file(Path::new(file_path)) {
+                let url_wide = pwstr_from_str(&url);
+                let _ = unsafe { webview.Navigate(PCWSTR(url_wide.as_ptr())) };
             }
         }
-    });
+    }
 
     CURRENT_FILES.with(|f| {
         f.borrow_mut()
