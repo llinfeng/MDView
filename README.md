@@ -12,12 +12,13 @@ A fast, lightweight Markdown viewer for Windows. Available as a Total Commander 
 
 - **WebView2 rendering** - Modern HTML rendering with full Markdown support (GUI mode)
 - **Floating table of contents** - Collapsible H1–H6 outline docked to the side, with active-heading highlighting as you scroll (GUI mode)
+- **Current file path** - A fixed bottom-left status line shows the absolute path of the rendered file, including after following Markdown links; long paths keep the filename and trailing folders visible on one line (GUI mode)
 - **Live reload** - The view refreshes automatically when the file changes on disk, and resumes your reading position, anchored to the nearest heading (GUI mode)
 - **Keyboard navigation** - Vim-style keys (`j`/`k`, `gg`/`G`, `Ctrl+d`/`Ctrl+u`, `Ctrl+f`/`Ctrl+b`) plus `[`/`]` to jump between headings (GUI mode)
 - **In-page find** - Press `/` to search the document (GUI mode)
 - **Auto dark mode** - Follows Windows appearance settings (GUI mode)
 - **Rich terminal output** - ANSI colors, clickable hyperlinks, unicode tables (terminal mode)
-- **Clickable links** - Click `.md` links to navigate, external links open in browser
+- **Clickable links** - Markdown links open in the viewer; local PDF, Word, and other attachments open in their default Windows app; external URLs open in the browser
 - **ESC to close** - Quick keyboard navigation
 - **Syntax highlighting** - Code blocks with proper formatting
 - **GitHub Flavored Markdown** - Tables, task lists, strikethrough, and more
@@ -232,6 +233,14 @@ XWIN_ARCH=x86,x86_64 cargo xwin build --release --target i686-pc-windows-msvc
 
 `XWIN_ARCH=x86,x86_64` is required so the 32-bit import libraries are downloaded
 for the `i686` (32-bit Total Commander) target.
+
+### Local release packaging
+
+Increment the package version in `Cargo.toml` for each new installer and rebuild both
+Windows architectures. Keep source changes in this repository; place versioned
+installers in `C:\Users\llinfeng\NutstoreDir\DotFile_Private\TC_Setup\TC_PlugIns\`
+as `MDView-v<version>.zip`. Include both WLX plugins, both standalone executables,
+`pluginst.inf`, `README.md`, and `LICENSE`. Preserve earlier installers.
 
 ### Output Files
 

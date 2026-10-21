@@ -344,7 +344,8 @@ fn main() {
             };
             let html_body = markdown::markdown_to_html(&markdown_content);
             let dark_mode = is_windows_dark_mode();
-            let full_html = markdown::wrap_html(&html_body, dark_mode);
+            let full_html =
+                markdown::wrap_html_with_path(&html_body, dark_mode, Some(Path::new(path)));
             let title = Path::new(path)
                 .file_name()
                 .unwrap_or_default()
@@ -1209,7 +1210,7 @@ fn create_virtual_resource_response(
     if ext == "md" || ext == "markdown" {
         let markdown_content = fs::read_to_string(file_path).ok()?;
         let html_body = markdown::markdown_to_html(&markdown_content);
-        let full_html = markdown::wrap_html(&html_body, dark_mode);
+        let full_html = markdown::wrap_html_with_path(&html_body, dark_mode, Some(file_path));
         create_web_resource_response(
             environment,
             full_html.as_bytes(),
@@ -1344,6 +1345,8 @@ fn handle_follow_link(url: &str) {
             });
             return;
         }
+        open_url_in_browser(&resolved_path);
+        return;
     }
 
     // External URLs: open in browser
@@ -2198,7 +2201,21 @@ fn init_webview2_gui(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                             windows::Win32::System::Com::CoTaskMemFree(Some(
                                                 uri_ptr.0 as *const _,
                                             ));
-                                            if !should_allow_webview_navigation(
+                                            let attachment = resolve_virtual_mdview_url(&uri)
+                                                .filter(|path| {
+                                                    !matches!(
+                                                        Path::new(path)
+                                                            .extension()
+                                                            .and_then(|e| e.to_str())
+                                                            .map(|e| e.to_ascii_lowercase())
+                                                            .as_deref(),
+                                                        Some("md" | "markdown")
+                                                    )
+                                                });
+                                            if let Some(path) = attachment {
+                                                let _ = args.SetCancel(true);
+                                                open_url_in_browser(&path);
+                                            } else if !should_allow_webview_navigation(
                                                 &uri,
                                                 user_initiated.as_bool(),
                                             ) {
@@ -2474,9 +2491,8 @@ unsafe extern "system" fn window_proc(
             // clicking the page first.
             let controller = CONTROLLER.with(|c| c.borrow().as_ref().cloned());
             if let Some(controller) = controller {
-                let _ = unsafe {
-                    controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
-                };
+                let _ =
+                    unsafe { controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) };
             }
             LRESULT(0)
         }

@@ -52,7 +52,10 @@ const WM_MDVIEW_REFRESH: u32 = WM_APP + 1;
 const WM_MDVIEW_TABOUT: u32 = WM_APP + 2;
 
 fn window_class_name() -> U16CString {
-    let unique = format!("{}_{}", WINDOW_CLASS_PREFIX, window_proc as *const () as usize);
+    let unique = format!(
+        "{}_{}",
+        WINDOW_CLASS_PREFIX, window_proc as *const () as usize
+    );
     U16CString::from_str(&unique).unwrap()
 }
 
@@ -341,7 +344,8 @@ fn create_virtual_resource_response(
     if ext == "md" || ext == "markdown" {
         let markdown_content = std::fs::read_to_string(file_path).ok()?;
         let html_body = crate::markdown::markdown_to_html(&markdown_content);
-        let full_html = crate::markdown::wrap_html(&html_body, dark_mode);
+        let full_html =
+            crate::markdown::wrap_html_with_path(&html_body, dark_mode, Some(file_path));
         create_web_resource_response(
             environment,
             full_html.as_bytes(),
@@ -496,7 +500,21 @@ fn init_webview2_sync(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                             windows::Win32::System::Com::CoTaskMemFree(Some(
                                                 uri_ptr.0 as *const _,
                                             ));
-                                            if !should_allow_webview_navigation(
+                                            let attachment = resolve_virtual_mdview_url(hwnd, &uri)
+                                                .filter(|path| {
+                                                    !matches!(
+                                                        Path::new(path)
+                                                            .extension()
+                                                            .and_then(|e| e.to_str())
+                                                            .map(|e| e.to_ascii_lowercase())
+                                                            .as_deref(),
+                                                        Some("md" | "markdown")
+                                                    )
+                                                });
+                                            if let Some(path) = attachment {
+                                                let _ = args.SetCancel(true);
+                                                open_url_in_browser(&path);
+                                            } else if !should_allow_webview_navigation(
                                                 &uri,
                                                 user_initiated.as_bool(),
                                             ) {
@@ -627,9 +645,12 @@ fn init_webview2_sync(hwnd: HWND, html: &str) -> windows::core::Result<()> {
                                                 // cycling through TOC / body links.
                                                 let _ = args.SetHandled(true);
                                                 let prev = PREV_FOCUS.with(|p| {
-                                                    p.borrow().get(&(accel_parent.0 as isize)).copied()
+                                                    p.borrow()
+                                                        .get(&(accel_parent.0 as isize))
+                                                        .copied()
                                                 });
-                                                if let Some(prev) = prev.filter(|w| !w.is_invalid()) {
+                                                if let Some(prev) = prev.filter(|w| !w.is_invalid())
+                                                {
                                                     let _ = SetFocus(Some(prev));
                                                 } else if let Ok(parent) = GetParent(accel_parent) {
                                                     if !parent.is_invalid() {

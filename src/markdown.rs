@@ -16,7 +16,11 @@ fn split_frontmatter(markdown: &str) -> Option<(&str, &str)> {
     let mut cursor = content_start;
     loop {
         let (line, next, at_eof) = match src[cursor..].find('\n') {
-            Some(p) => (src[cursor..cursor + p].trim_end_matches('\r'), cursor + p + 1, false),
+            Some(p) => (
+                src[cursor..cursor + p].trim_end_matches('\r'),
+                cursor + p + 1,
+                false,
+            ),
             None => (src[cursor..].trim_end_matches('\r'), src.len(), true),
         };
         if line == "---" || line == "..." {
@@ -157,6 +161,35 @@ a { cursor: pointer; }
     white-space: pre-wrap;
     word-break: break-word;
     overflow-x: auto;
+}
+
+/* Keep the current file visible at the viewport's bottom-left corner. */
+body.mdview-has-path { padding-bottom: 52px; }
+body.mdview-has-path #mdview-toc { height: calc(100vh - 28px); }
+#mdview-file-path {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 28px;
+    box-sizing: border-box;
+    padding: 4px 8px;
+    border-top: 1px solid %%BORDER%%;
+    background-color: %%TOC_BG%%;
+    color: %%MUTED%%;
+    font: 12px/19px "Segoe UI", sans-serif;
+    white-space: nowrap;
+    display: flex;
+    justify-content: flex-end;
+    overflow: hidden;
+    z-index: 1100;
+    user-select: text;
+}
+
+#mdview-file-path > span {
+    flex: 0 0 auto;
+    min-width: 100%;
+    text-align: left;
 }
 
 /* ---- Table of contents ---- */
@@ -657,9 +690,17 @@ const VIEWER_SCRIPT: &str = r#"
             return;
         }
 
-        if (webview && e.ctrlKey) {
+        if (!webview) return;
+        var target = new URL(link.href || href, location.href);
+        var local = target.protocol === 'file:' ||
+            ((target.protocol === 'https:' || target.protocol === 'http:') &&
+             target.hostname === 'mdview.example');
+        var markdown = /\.(md|markdown)$/i.test(decodeURIComponent(target.pathname));
+        // Hand local attachments to Windows before the browser can download them.
+        // Markdown retains browser navigation, including #heading fragments.
+        if (e.ctrlKey || (local && !markdown)) {
             e.preventDefault();
-            webview.postMessage({type: 'openLink', url: link.href || href});
+            webview.postMessage({type: 'openLink', url: target.href});
         }
     });
 
@@ -889,7 +930,17 @@ const FIND_MARKUP: &str = r#"<div id="mdview-find" role="search">
 </div>
 "#;
 
+#[allow(dead_code)]
 pub fn wrap_html(content: &str, dark_mode: bool) -> String {
+    wrap_html_with_path(content, dark_mode, None)
+}
+
+/// Include the native absolute file path in a fixed, selectable status line.
+pub fn wrap_html_with_path(
+    content: &str,
+    dark_mode: bool,
+    file_path: Option<&std::path::Path>,
+) -> String {
     // (bg, text, code_bg, link, border, toc_bg, toc_hover, toc_active)
     let (
         bg_color,
@@ -935,7 +986,25 @@ pub fn wrap_html(content: &str, dark_mode: bool) -> String {
     );
     out.push_str("<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n<style>");
     out.push_str(&styles);
-    out.push_str("</style>\n</head>\n<body>\n");
+    out.push_str("</style>\n</head>\n");
+    if let Some(path) = file_path {
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let escaped = absolute
+            .to_string_lossy()
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&#39;");
+        out.push_str("<body class=\"mdview-has-path\">\n");
+        out.push_str("<div id=\"mdview-file-path\" aria-label=\"Rendered file path\" title=\"");
+        out.push_str(&escaped);
+        out.push_str("\"><span>");
+        out.push_str(&escaped);
+        out.push_str("</span></div>\n");
+    } else {
+        out.push_str("<body>\n");
+    }
     out.push_str(TOC_MARKUP);
     out.push_str(FIND_MARKUP);
     out.push_str(&content);
@@ -985,6 +1054,24 @@ pub fn markdown_to_plain_text(markdown: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_path_footer_escapes_and_resolves_path() {
+        let path = std::path::Path::new("notes & <draft>.md");
+        let html = wrap_html_with_path("<p>Body</p>", false, Some(path));
+        let absolute = std::path::absolute(path).unwrap();
+        let expected = absolute
+            .to_string_lossy()
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        assert!(html.contains(&format!(
+            "title=\"{}\"><span>{}</span></div>",
+            expected, expected
+        )));
+        assert!(html.contains("<body class=\"mdview-has-path\">"));
+        assert!(!wrap_html("<p>No file</p>", false).contains("<div id=\"mdview-file-path\""));
+    }
 
     #[test]
     fn test_basic_markdown() {

@@ -72,7 +72,8 @@ fn load_markdown_file(parent: HWND, file_path: &str, dark_mode: bool) -> HWND {
 
     // Convert to HTML
     let html_body = markdown::markdown_to_html(&markdown_content);
-    let full_html = markdown::wrap_html(&html_body, dark_mode);
+    let full_html =
+        markdown::wrap_html_with_path(&html_body, dark_mode, Some(std::path::Path::new(file_path)));
 
     // Create viewer window with WebView2
     match viewer::create_viewer(parent, &full_html, Some(file_path), dark_mode) {
